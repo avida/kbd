@@ -68,7 +68,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         if has_f23 && has_meta && has_lshift {
             // Spawn a new thread to print "a" after 500 milliseconds, so as not to block the loop
             // Emulate sticky left control key: press, wait, release
-            std::thread::spawn(|| {
+            std::thread::scope(|s| {
+                s.spawn(|| {
                     // Press left control
                     println!("Gotcha");
                     let _ = uinput_dev.press(&UKey::LeftControl);
@@ -79,7 +80,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     uinput_dev.release(&UKey::LeftControl);
                     uinput_dev.synchronize();
                 });
-            println!("release");
+                println!("release");
+            });
         }
 
         sleep(Duration::from_millis(1));
