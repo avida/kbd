@@ -109,3 +109,30 @@ macro_rules! evdev_to_uinput_key {
         }
     };
 }
+
+#[macro_export]
+macro_rules! mmm {
+    () => {
+        println!("------ this is macro ------")
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use evdev::Key;
+    use uinput::event::keyboard::Key as UKey;
+
+    #[test]
+    fn test_evdev_to_uinput_key_basic() {
+        assert_eq!(evdev_to_uinput_key!(Key::KEY_A), UKey::A);
+        assert_eq!(evdev_to_uinput_key!(Key::KEY_B), UKey::B);
+        assert_eq!(evdev_to_uinput_key!(Key::KEY_1), UKey::_1);
+        assert_eq!(evdev_to_uinput_key!(Key::KEY_ENTER), UKey::Enter);
+        assert_eq!(evdev_to_uinput_key!(Key::KEY_F12), UKey::F12);
+    }
+
+    #[test]
+    fn test_evdev_to_uinput_key_default() {
+        assert_eq!(evdev_to_uinput_key!(Key::KEY_UNKNOWN), UKey::A);
+    }
+}

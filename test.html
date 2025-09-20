@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>J/K Key Press Counter</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; margin-top: 50px; }
+        .counter { font-size: 2em; margin: 20px; }
+        .reset-label { cursor: pointer; color: blue; text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <h1>J/K Key Presses Per Second</h1>
+    <div class="counter" id="counter">0</div>
+    <div>
+        <span class="reset-label" id="max-label">Max per second:</span>
+        <span id="max-counter">0</span>
+    </div>
+    <p>Press <b>J</b> or <b>K</b> keys!</p>
+    <script>
+        let count = 0;
+        let max = 0;
+        let display = document.getElementById('counter');
+        let maxDisplay = document.getElementById('max-counter');
+        let maxLabel = document.getElementById('max-label');
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'j' || e.key === 'k' || e.key === 'J' || e.key === 'K') {
+                count++;
+            }
+        });
+
+        setInterval(function() {
+            display.textContent = count;
+            if (count > max) {
+                max = count;
+                maxDisplay.textContent = max;
+            }
+            count = 0;
+        }, 1000);
+
+        maxLabel.addEventListener('click', function() {
+            max = 0;
+            maxDisplay.textContent = max;
+        });
+    </script>
+</body>
+</html>
