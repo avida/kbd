@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::mpsc::{self, RecvError};
+use std::sync::mpsc::{self};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -9,16 +9,18 @@ use uinput::event::keyboard::Key as UKey;
 extern crate chrono;
 extern crate timer;
 
+const DELAY_MS: i64 = 5;
+
 #[derive(Debug, PartialEq)]
-enum Action {
+pub enum Action {
     Press,
     Release,
 }
 
 #[derive(Debug, PartialEq)]
-struct Event {
-    key: UKey,
-    action: Action,
+pub struct Event {
+    pub key: UKey,
+    pub action: Action,
 }
 
 struct BufferEvent {
@@ -35,21 +37,21 @@ impl std::fmt::Debug for BufferEvent {
 }
 
 impl BufferEvent {
-    fn drop(&mut self) {
+    fn cancel(&mut self) {
         if let Some(g) = self.guard.take() {
             drop(g);
+            self.guard = None;
         }
     }
 }
 
 #[derive(Debug)]
-struct ThreadBuffer {
+pub struct ThreadBuffer {
     deque: Arc<Mutex<VecDeque<BufferEvent>>>,
     push_channel: mpsc::Sender<Event>,
     pop_channel: mpsc::Receiver<Event>,
 }
 
-const DELAY_MS: i64 = 500;
 
 impl ThreadBuffer {
     pub fn push(&mut self, key: UKey, action: Action) {
@@ -65,13 +67,27 @@ impl ThreadBuffer {
             Err(_) => None,
         }
     }
+
+    pub fn try_pop(&mut self) -> Option<Event> {
+        match self.pop_channel.try_recv() {
+            Ok(event) => Some(event),
+            Err(_) => None,
+        }
+    }
+    pub fn drop(&self) {
+        let mut m = self.deque.lock().unwrap();
+        for el in m.iter_mut() {
+            el.cancel();
+        }
+    }
 }
 
 impl ThreadBuffer {
     pub fn new() -> Self {
         let c_in = mpsc::channel::<Event>();
         let c_out = mpsc::channel::<Event>();
-        let dq = Arc::new(Mutex::new(VecDeque::<BufferEvent>::new()));
+        let dq: Arc<Mutex<VecDeque<BufferEvent>>> =
+            Arc::new(Mutex::new(VecDeque::<BufferEvent>::new()));
 
         let dq_c = Arc::clone(&dq);
         thread::spawn(move || {
@@ -79,24 +95,21 @@ impl ThreadBuffer {
             let timer = timer::Timer::new();
             loop {
                 for received in &c_in.1 {
-                    println!("Hi from service thread {:?}", received);
                     let dq_cc = dq_c.clone();
+                    let pop_clone = pop.clone();
                     let be = BufferEvent {
                         event: received,
                         guard: Some(timer.schedule_with_delay(
                             chrono::Duration::milliseconds(DELAY_MS),
                             move || {
-                                println!("Timer expired!!");
                                 let mut dlq = dq_cc.lock().unwrap();
                                 if let Some(e) = dlq.pop_front() {
-                                    println!("be:: {:?}", e);
-                                    // pop.send(e.event);
+                                    pop_clone.send(e.event).unwrap();
                                 }
                             },
                         )),
                     };
                     let mut dlq = dq_c.lock().unwrap();
-                    println!("Pushed");
                     dlq.push_back(be);
                 }
             }
@@ -131,15 +144,8 @@ mod tests {
         let mut buf = ThreadBuffer::new();
         buf.push(UKey::A, Action::Press);
         buf.push(UKey::B, Action::Release);
+        buf.push(UKey::C, Action::Release);
 
-        let t = thread::spawn(move || {
-            thread::sleep(Duration::from_secs(1));
-            println!("Hi from thread");
-        });
-        println!("{:?}", buf);
-        t.join().unwrap();
-
-        println!("Wait {:?}", buf);
         assert_eq!(
             buf.pop(),
             Some(Event {
@@ -150,10 +156,30 @@ mod tests {
         assert_eq!(
             buf.pop(),
             Some(Event {
-                key: UKey::A,
+                key: UKey::B,
                 action: Action::Release
             })
         );
+        assert_eq!(
+            buf.pop(),
+            Some(Event {
+                key: UKey::C,
+                action: Action::Release
+            })
+        );
+        assert_eq!(buf.try_pop(), None);
+    }
+
+    #[test]
+    fn test_buffer_drop() {
+        let mut buf = ThreadBuffer::new();
+        buf.push(UKey::A, Action::Press);
+        buf.push(UKey::B, Action::Release);
+        buf.push(UKey::C, Action::Release);
+        thread::sleep(Duration::from_millis(1));
+        buf.drop();
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(buf.try_pop(), None);
     }
 
     #[test]
