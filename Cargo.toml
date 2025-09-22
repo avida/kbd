@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.42"
 evdev = "0.12"
-rand = "0.9.2"
 timer = "0.2.0"
 uinput = "0.1.3"
 

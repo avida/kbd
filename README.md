@@ -7,4 +7,8 @@ run tests:
 
 > cargo test -- --nocapture
 
+build release:
+
+> cargo build --release
+
 
