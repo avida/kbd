@@ -13,7 +13,7 @@ pub use uinput::event::keyboard::Key as UKey;
 extern crate chrono;
 extern crate timer;
 
-const DELAY_MS: i64 = 5;
+const DELAY_MS: i64 = 3;
 const KEY_CAPASITY: usize = 10;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -198,7 +198,7 @@ impl KeyBuffer {
                                     key: UKey::RightControl,
                                     action: Action::Release,
                                 },
-                                700
+                                500
                             );
                         }
                     }
