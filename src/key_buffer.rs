@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use super::key_scheduler::KeyScheduler;
 use crate::debug_println;
 use std::collections::VecDeque;
 use std::error::Error;
@@ -89,6 +90,7 @@ pub struct KeyBuffer {
     pop_channel: SafeReceiver,
     _pop_channel_s: SafeSender,
     timer: timer::Timer,
+    key_scheduler: Arc<Mutex<KeyScheduler>>,
 }
 
 impl KeyBuffer {
@@ -173,21 +175,32 @@ impl KeyBuffer {
                     debug_println!("Buffer size after push: {}", kb.deque.lock().unwrap().len());
                     if kb.clone()._gotcha() {
                         kb.clone()._drop();
-                        debug_println!("GOIDAAAAAAAAAAAAAA!!");
-                        kb.clone()._schedule_event(
-                            Event {
-                                key: UKey::A,
-                                action: Action::Press,
-                            },
-                            0,
-                        );
-                        kb.clone()._schedule_event(
-                            Event {
-                                key: UKey::A,
-                                action: Action::Release,
-                            },
-                            2000,
-                        );
+                        {
+                            let mut locked_scheduler = kb.key_scheduler.lock().unwrap();
+                            macro_rules! try_schedule {
+                                ($scheduler:expr, $event:expr, $delay:expr) => {
+                                    if let Err(e) = $scheduler.schedule($event, $delay) {
+                                        eprintln!("Error scheduling event: {}", e);
+                                    }
+                                };
+                            }
+                            try_schedule!(
+                                locked_scheduler,
+                                Event {
+                                    key: UKey::RightControl,
+                                    action: Action::Press,
+                                },
+                                0
+                            );
+                            try_schedule!(
+                                locked_scheduler,
+                                Event {
+                                    key: UKey::RightControl,
+                                    action: Action::Release,
+                                },
+                                700
+                            );
+                        }
                     }
                 }
             }
@@ -202,14 +215,17 @@ impl KeyBuffer {
                 Arc::new(Mutex::new($arg))
             };
         }
+
+        let push_channel_ptr = make_recv!(c_in.0);
         let kb = Arc::new(KeyBuffer {
             deque: make_recv!(VecDeque::<BufferEvent>::with_capacity(KEY_CAPASITY)),
-            push_channel: make_recv!(c_in.0),
+            push_channel: push_channel_ptr.clone(),
             _push_channel_r: make_recv!(c_in.1),
 
             pop_channel: make_recv!(c_out.1),
             _pop_channel_s: make_recv!(c_out.0),
             timer: timer::Timer::new(),
+            key_scheduler: make_recv!(KeyScheduler::new(push_channel_ptr.clone()).unwrap()),
         });
         KeyBuffer::_start_listen(kb.clone());
         Ok(kb.clone())

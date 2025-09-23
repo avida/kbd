@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let key_buffer = KeyBuffer::new()?;
 
     let buffer_cntr = key_buffer.clone();
+
     udev_loop::Udev::start_listen(Arc::new(Mutex::new(uloop)), buffer_cntr.clone());
     return key_grabber::grab_kb_events(buffer_cntr.clone());
 }
