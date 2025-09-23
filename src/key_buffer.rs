@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use timer::Guard;
-use uinput::event::keyboard::Key as UKey;
+pub use uinput::event::keyboard::Key as UKey;
 
 extern crate chrono;
 extern crate timer;
@@ -15,13 +15,13 @@ extern crate timer;
 const DELAY_MS: i64 = 5;
 const KEY_CAPASITY: usize = 10;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Action {
     Press,
     Release,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Event {
     pub key: UKey,
     pub action: Action,
@@ -32,7 +32,7 @@ struct BufferEvent {
     guard: Option<Guard>,
 }
 
-static pattern: [Event; 6] = [
+static PATTERN: [Event; 6] = [
     Event {
         key: UKey::LeftMeta,
         action: Action::Press,
@@ -77,14 +77,18 @@ impl BufferEvent {
     }
 }
 
-type SyncReceiver<T> = Arc<Mutex<mpsc::Receiver<T>>>;
+type SafeReceiver = Arc<Mutex<mpsc::Receiver<Event>>>;
+pub type SafeSender = Arc<Mutex<mpsc::Sender<Event>>>;
 type KeyDeque = VecDeque<BufferEvent>;
 
-#[derive(Debug)]
 pub struct KeyBuffer {
     deque: Arc<Mutex<KeyDeque>>,
-    push_channel: mpsc::Sender<Event>,
-    pop_channel: SyncReceiver<Event>,
+    push_channel: SafeSender,
+    _push_channel_r: SafeReceiver,
+
+    pop_channel: SafeReceiver,
+    _pop_channel_s: SafeSender,
+    timer: timer::Timer,
 }
 
 impl KeyBuffer {
@@ -94,9 +98,9 @@ impl KeyBuffer {
             action: action,
         };
         if DELAY_MS == 0 {
-            self.push_channel.send(event).unwrap();
+            self.push_channel.lock().unwrap().send(event).unwrap();
         } else {
-            self.push_channel.send(event).unwrap();
+            self.push_channel.lock().unwrap().send(event).unwrap();
         }
     }
     pub fn pop(&self) -> Option<Event> {
@@ -117,82 +121,98 @@ impl KeyBuffer {
         }
     }
 
-    fn _drop(deque: &mut KeyDeque) {
+    fn _drop(self: Arc<Self>) {
+        let mut deque = self.deque.lock().unwrap();
         for el in deque.iter_mut() {
             el.cancel();
         }
         deque.clear();
     }
-
-    fn _schedule(deque: &mut KeyDeque, event: Event) {
-
-    }
 }
 
 impl KeyBuffer {
-    fn _gotcha(deq: &KeyDeque) -> bool {
-        if pattern.len() != deq.len() {
+    fn _gotcha(self: Arc<Self>) -> bool {
+        let deq = self.deque.lock().unwrap();
+        if PATTERN.len() != deq.len() {
             return false;
         }
-        for (buf_event, pat_event) in deq.iter().zip(pattern.iter()) {
+        for (buf_event, pat_event) in deq.iter().zip(PATTERN.iter()) {
             if buf_event.event != *pat_event {
                 return false;
             }
         }
         true
     }
-    fn _start_listen(& mut self) {
 
+    fn _schedule_event(self: Arc<Self>, event: Event, delay: i64) {
+        debug_println!("Scheduled {:?} {}", event, delay);
+        let self_c = self.clone();
+        let be = BufferEvent {
+            event: event,
+            guard: Some(self.timer.schedule_with_delay(
+                chrono::Duration::milliseconds(delay),
+                move || {
+                    let mut dlq = self_c.deque.lock().unwrap();
+
+                    if let Some(e) = dlq.pop_front() {
+                        self_c._pop_channel_s.lock().unwrap().send(e.event).unwrap();
+                    }
+                },
+            )),
+        };
+        let mut dlq = self.deque.lock().unwrap();
+        dlq.push_back(be);
     }
 
-    pub fn new() -> Result<Self, Box<dyn Error>> {
-        let c_in = mpsc::channel::<Event>();
-        let c_out = mpsc::channel::<Event>();
-        let dq: Arc<Mutex<VecDeque<BufferEvent>>> = Arc::new(Mutex::new(
-            VecDeque::<BufferEvent>::with_capacity(KEY_CAPASITY),
-        ));
-
-        let dq_c = dq.clone();
+    fn _start_listen(key_buffer: Arc<Self>) {
         thread::spawn(move || {
-            let pop = &c_out.0;
-            let timer = timer::Timer::new();
+            let kb = key_buffer.clone();
             loop {
-                for received in &c_in.1 {
-                    let dq_cc = dq_c.clone();
-                    let pop_clone = pop.clone();
-                    let be = BufferEvent {
-                        event: received,
-                        guard: Some(timer.schedule_with_delay(
-                            chrono::Duration::milliseconds(DELAY_MS),
-                            move || {
-                                let mut dlq = dq_cc.lock().unwrap();
-                                if let Some(e) = dlq.pop_front() {
-                                    pop_clone.send(e.event).unwrap();
-                                }
-                            },
-                        )),
-                    };
-                    let mut dlq = dq_c.lock().unwrap();
-                    dlq.push_back(be);
-                    debug_println!("Buffer size after push: {}", dlq.len());
-                    if KeyBuffer::_gotcha(&dlq) {
-                        KeyBuffer::_drop(&mut dlq);
+                if let Ok(received) = kb._push_channel_r.lock().unwrap().recv() {
+                    kb.clone()._schedule_event(received, DELAY_MS);
+                    debug_println!("Buffer size after push: {}", kb.deque.lock().unwrap().len());
+                    if kb.clone()._gotcha() {
+                        kb.clone()._drop();
                         debug_println!("GOIDAAAAAAAAAAAAAA!!");
-                        let pop_clone = pop.clone();
-                        pop_clone.send(Event { key: UKey::A, action: Action::Press }).unwrap();
-                        let mut  g= Some(timer.schedule_with_delay(chrono::Duration::milliseconds(200), move||{
-                            debug_println!("GOIDa 222!!");
-                        }));
-
+                        kb.clone()._schedule_event(
+                            Event {
+                                key: UKey::A,
+                                action: Action::Press,
+                            },
+                            0,
+                        );
+                        kb.clone()._schedule_event(
+                            Event {
+                                key: UKey::A,
+                                action: Action::Release,
+                            },
+                            2000,
+                        );
                     }
                 }
             }
         });
-        Ok(KeyBuffer {
-            deque: dq,
-            push_channel: c_in.0,
-            pop_channel: Arc::new(Mutex::new(c_out.1)),
-        })
+    }
+
+    pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+        let c_in = mpsc::channel::<Event>();
+        let c_out = mpsc::channel::<Event>();
+        macro_rules! make_recv {
+            ($arg:expr) => {
+                Arc::new(Mutex::new($arg))
+            };
+        }
+        let kb = Arc::new(KeyBuffer {
+            deque: make_recv!(VecDeque::<BufferEvent>::with_capacity(KEY_CAPASITY)),
+            push_channel: make_recv!(c_in.0),
+            _push_channel_r: make_recv!(c_in.1),
+
+            pop_channel: make_recv!(c_out.1),
+            _pop_channel_s: make_recv!(c_out.0),
+            timer: timer::Timer::new(),
+        });
+        KeyBuffer::_start_listen(kb.clone());
+        Ok(kb.clone())
     }
 }
 
@@ -235,25 +255,24 @@ mod tests {
 
     #[test]
     fn test_buffer_drop() {
-        let mut buf = KeyBuffer::new().unwrap();
+        let buf = KeyBuffer::new().unwrap();
         buf.push(UKey::A, Action::Press);
         buf.push(UKey::B, Action::Release);
         buf.push(UKey::C, Action::Release);
         thread::sleep(Duration::from_millis(1));
-        let mut dlq = buf.deque.lock().unwrap();
-        KeyBuffer::_drop(&mut dlq);
+        buf.clone()._drop();
         thread::sleep(Duration::from_millis(300));
         assert_eq!(buf.try_pop(), None);
-        assert_eq!(dlq.len(), 0);
+        assert_eq!(buf.deque.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn test_timer_simple() {
         let timer = timer::Timer::new();
         println!("schedule");
-        let mut g = timer.schedule_with_delay(chrono::Duration::milliseconds(100), move || {
-                println!("WEFWEFWEF");
-            });
+        let _g = timer.schedule_with_delay(chrono::Duration::milliseconds(100), move || {
+            println!("WEFWEFWEF");
+        });
 
         thread::sleep(Duration::from_secs(1));
     }
