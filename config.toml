@@ -1,0 +1,3 @@
+[main]
+# combination to replace HP laptop copilot key with control
+"leftmeta + leftshift  + F23" = "leftctrl down + wait(500) + leftctrl up"

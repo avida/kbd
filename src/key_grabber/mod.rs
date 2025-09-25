@@ -23,7 +23,7 @@ pub fn grab_kb_events(buffer: Arc<KeyBuffer>) -> Result<(), Box<dyn Error>> {
         std::process::exit(0);
     });
 
-    let mut dev = Device::open(DEVICE_PATH)?;
+    let mut dev = Device::open(DEVICE_PATH).expect("Failed to capture device");
     dev.grab()?;
     loop {
         for event in dev.fetch_events()? {

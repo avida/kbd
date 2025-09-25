@@ -33,7 +33,7 @@ struct BufferEvent {
     guard: Option<Guard>,
 }
 
-static PATTERN: [Event; 6] = [
+static PATTERN: [Event; 3] = [
     Event {
         key: UKey::LeftMeta,
         action: Action::Press,
@@ -46,18 +46,18 @@ static PATTERN: [Event; 6] = [
         key: UKey::F23,
         action: Action::Press,
     },
-    Event {
-        key: UKey::LeftMeta,
-        action: Action::Release,
-    },
-    Event {
-        key: UKey::LeftShift,
-        action: Action::Release,
-    },
-    Event {
-        key: UKey::F23,
-        action: Action::Release,
-    },
+    // Event {
+    //     key: UKey::LeftMeta,
+    //     action: Action::Release,
+    // },
+    // Event {
+    //     key: UKey::LeftShift,
+    //     action: Action::Release,
+    // },
+    // Event {
+    //     key: UKey::F23,
+    //     action: Action::Release,
+    // },
 ];
 
 impl std::fmt::Debug for BufferEvent {

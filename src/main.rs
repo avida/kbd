@@ -3,13 +3,14 @@ mod key_grabber;
 mod udev_loop;
 mod utils;
 mod key_scheduler;
+mod config;
 
 use key_buffer::KeyBuffer;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let uloop = udev_loop::Udev::new()?;
+    let uloop = udev_loop::Udev::new().expect("Failed to create Udev device");
     let key_buffer = KeyBuffer::new()?;
 
     let buffer_cntr = key_buffer.clone();
