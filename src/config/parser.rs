@@ -1,16 +1,16 @@
 use crate::key_buffer::{Action, UKey};
 
 impl Action {
-    fn from_str(s: &str) -> Result<Action, &'static str> {
+    fn from_str(s: &str) -> Result<Action, String> {
         match s {
             "up" => Ok(Action::Release),
             "down" => Ok(Action::Press),
-            _ => Err("Unknown action"),
+            _ => Err(format!("Unknown action {s}")),
         }
     }
 }
 
-fn to_u_key(s: &str) -> Result<UKey, &'static str> {
+fn to_u_key(s: &str) -> Result<UKey, String> {
     match s {
         "a" => Ok(UKey::A),
         "b" => Ok(UKey::B),
@@ -62,6 +62,18 @@ fn to_u_key(s: &str) -> Result<UKey, &'static str> {
         "f10" => Ok(UKey::F10),
         "f11" => Ok(UKey::F11),
         "f12" => Ok(UKey::F12),
+        "f13" => Ok(UKey::F13),
+        "f14" => Ok(UKey::F14),
+        "f15" => Ok(UKey::F15),
+        "f16" => Ok(UKey::F16),
+        "f17" => Ok(UKey::F17),
+        "f18" => Ok(UKey::F18),
+        "f19" => Ok(UKey::F19),
+        "f20" => Ok(UKey::F20),
+        "f21" => Ok(UKey::F21),
+        "f22" => Ok(UKey::F22),
+        "f23" => Ok(UKey::F23),
+        "f24" => Ok(UKey::F24),
         "insert" => Ok(UKey::Insert),
         "delete" => Ok(UKey::Delete),
         "home" => Ok(UKey::Home),
@@ -89,27 +101,28 @@ fn to_u_key(s: &str) -> Result<UKey, &'static str> {
         "7" => Ok(UKey::_7),
         "8" => Ok(UKey::_8),
         "9" => Ok(UKey::_9),
-        _ => Err("Unknown sedf"),
+        _ => Err(format!("Unknown key {}", s).to_string()),
     }
 }
 
-#[derive(Debug, PartialEq)]
-struct KeyExpr {
-    key: UKey,
-    action: Option<Action>,
+#[derive(Debug, PartialEq, Hash)]
+pub struct KeyExpr {
+    pub key: UKey,
+    pub action: Option<Action>,
 }
 #[derive(Debug, PartialEq)]
-struct WaitExpr {
+pub struct WaitExpr {
     milliseconds: u64,
 }
 
 #[derive(Debug, PartialEq)]
-enum Expr {
+pub enum Expr {
     Key(KeyExpr),
     Wait(WaitExpr),
 }
+pub type Expressions = Vec<Expr>;
 
-fn parse_expr(input: &str) -> Vec<Expr> {
+pub fn parse_expr(input: &str) -> Vec<Expr> {
     let input = input.to_lowercase();
     let mut exprs = Vec::<Expr>::new();
     for i in input.split('+') {
@@ -133,8 +146,8 @@ fn parse_expr(input: &str) -> Vec<Expr> {
                 }
                 _ => {
                     exprs.push(Expr::Key(KeyExpr {
-                        key: to_u_key(tmp_split[1]).unwrap(),
-                        action: Some(Action::from_str(tmp_split[0]).unwrap()),
+                        key: to_u_key(tmp_split[0]).unwrap(),
+                        action: Some(Action::from_str(tmp_split[1]).unwrap()),
                     }));
                 }
             },
@@ -159,7 +172,7 @@ mod tests {
         }
 
         assert_parsed_exprs!(
-            "Down leftctrl + Wait 500 + up leftctrl + wait 200 +      esc",
+            "leftctrl Down  + Wait 500 + leftctrl up + wait 200 +      esc",
             vec![
                 Expr::Key(KeyExpr {
                     key: UKey::LeftControl,
@@ -180,7 +193,7 @@ mod tests {
 
         // Additional tests
         assert_parsed_exprs!(
-            "wait 1000 + up a + down b + c",
+            "wait 1000 + a up + b down + c",
             vec![
                 Expr::Wait(WaitExpr { milliseconds: 1000 }),
                 Expr::Key(KeyExpr {
@@ -207,7 +220,7 @@ mod tests {
         );
 
         assert_parsed_exprs!(
-            "down leftshift",
+            "leftshift down",
             vec![Expr::Key(KeyExpr {
                 key: UKey::LeftShift,
                 action: Some(Action::Press),
@@ -223,7 +236,7 @@ mod tests {
 
         assert_parsed_exprs!("wait 50", vec![Expr::Wait(WaitExpr { milliseconds: 50 })]);
 
-        let inp = "Down leftctrl + Wait 500 + up leftctrl + wait 200 +      esc";
+        let inp = "leftctrl Down + Wait 500 + leftctrl up + wait 200 +      esc";
         let exprs = parse_expr(&inp);
         for e in exprs {
             println!("Expressions {e:?}");

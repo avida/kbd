@@ -1,7 +1,18 @@
 #![allow(dead_code)]
+use std::collections::HashSet;
+use std::rc::Rc;
+
+use crate::config::parser::Expr;
+use crate::key_buffer::Event;
+use crate::{
+    config::parser::KeyExpr,
+    key_buffer::{Action, UKey},
+};
+use parser::{Expressions, parse_expr};
 use serde::Deserialize;
 use toml::Table;
 
+mod config_processor;
 mod parser;
 
 #[derive(Deserialize, Debug)]
@@ -9,26 +20,143 @@ struct Config {
     main: Table,
 }
 
-fn read_config(path: &str) -> Result<Config, &'static str> {
+#[derive(Debug)]
+pub struct KeyCombination {
+    combination: Expressions,
+    action: Expressions,
+}
+
+type KeyCombinations = Vec<KeyCombination>;
+
+#[derive(Debug)]
+struct ParsedConfig {
+    key_combinations: KeyCombinations,
+    keys_set: Box<HashSet<Event>>,
+}
+
+impl ParsedConfig {
+    pub fn has_key(&self, event: &Event) -> bool {
+        return self.keys_set.contains(event);
+    }
+}
+
+macro_rules! read_config {
+    ($a: expr) => {
+        _read_config($a)
+    };
+    () => {
+        _read_config("config.toml")
+    };
+}
+
+fn _parse_config(config: &Config) -> ParsedConfig {
+    let mut combos = Vec::<KeyCombination>::new();
+    let mut key_events = Box::new(HashSet::<Event>::new());
+    for (k, v) in config.main.iter() {
+        if let toml::Value::String(v) = v {
+            let parsed_condition = parse_expr(k);
+            for c in &parsed_condition {
+                if let Expr::Key(k) = c {
+                    match &k.action {
+                        None => {
+                            key_events.insert(Event {
+                                key: k.key,
+                                action: Action::Press,
+                            });
+                            key_events.insert(Event {
+                                key: k.key,
+                                action: Action::Release,
+                            });
+                        }
+                        Some(action) => {
+                            key_events.insert(Event {
+                                key: k.key,
+                                action: action.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+            let parsed_action = parse_expr(v);
+            combos.push(KeyCombination {
+                combination: parsed_condition,
+                action: parsed_action,
+            });
+        } else {
+            panic!("Expected a string value for key '{}', but found {:?}", k, v)
+        }
+    }
+
+    ParsedConfig {
+        key_combinations: combos,
+        keys_set: key_events.clone(),
+    }
+}
+
+fn _read_config(path: &str) -> Result<Config, &'static str> {
     let config_str = std::fs::read_to_string(path).expect("Failed to read config.toml");
     if let Ok(config) = toml::from_str(config_str.as_str()) {
         Ok(config)
     } else {
-        Err("sefwef")
+        Err("Failed to parse config file")
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
     fn test_config() {
-        let config: Config = read_config("config.toml").unwrap();
-        println!("{:?}", config);
-        println!("{}", config.main);
+        let config = read_config!().unwrap();
+        let expected_key = "leftmeta + leftshift  + F23";
+        assert!(
+            config.main.contains_key(expected_key),
+            "Config 'main' does not contain the expected key"
+        );
+        if let Some(toml::Value::String(v)) = config.main.get(expected_key) {
+            assert_eq!(v, "leftctrl down + wait 500 + leftctrl up");
+        }
     }
-
+    #[test]
+    fn test_config_parse() {
+        let config = Config {
+            main: Table::from_str(
+                r#"
+                "leftmeta + leftshift  + F23" = "leftctrl down + wait 500  + leftctrl up"
+            "#,
+            )
+            .unwrap(),
+        };
+        let parsed_config = _parse_config(&config);
+        assert!(parsed_config.has_key(&Event {
+            key: UKey::LeftShift,
+            action: Action::Press
+        }));
+        assert!(parsed_config.has_key(&Event {
+            key: UKey::LeftShift,
+            action: Action::Release
+        }));
+        assert!(parsed_config.has_key(&Event {
+            key: UKey::F23,
+            action: Action::Press
+        }));
+        assert!(parsed_config.has_key(&Event {
+            key: UKey::F23,
+            action: Action::Release
+        }));
+        assert_eq!(
+            parsed_config.has_key(&Event {
+                key: UKey::F24,
+                action: Action::Release
+            }),
+            false
+        );
+        println!("config {config:?}");
+        println!("parsed {parsed_config:?}");
+    }
     #[test]
     #[ignore = "Rust playground"]
     fn test_something() {
@@ -46,7 +174,7 @@ mod tests {
 
             &s[..]
         }
-        let inp = "leftctrl down + wait(500) + leftctrl up";
+        let inp = "leftctrl down + wait 500  + leftctrl up";
         let mut v = vec![1, 2, 3, 5];
         let mut ccc = || {
             println!("closure {v:?}");

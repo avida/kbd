@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use timer::Guard;
+use uinput::event::Code;
 pub use uinput::event::keyboard::Key as UKey;
 
 extern crate chrono;
@@ -16,20 +17,32 @@ extern crate timer;
 const DELAY_MS: i64 = 3;
 const KEY_CAPASITY: usize = 10;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum Action {
     Press,
     Release,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Event {
     pub key: UKey,
     pub action: Action,
 }
 
-struct BufferEvent {
-    event: Event,
+impl Ord for Event {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key.code().cmp(&other.key.code())
+    }
+}
+
+impl PartialOrd for Event {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+pub struct BufferEvent {
+    pub event: Event,
     guard: Option<Guard>,
 }
 
@@ -80,7 +93,7 @@ impl BufferEvent {
 
 type SafeReceiver = Arc<Mutex<mpsc::Receiver<Event>>>;
 pub type SafeSender = Arc<Mutex<mpsc::Sender<Event>>>;
-type KeyDeque = VecDeque<BufferEvent>;
+pub type KeyDeque = VecDeque<BufferEvent>;
 
 pub struct KeyBuffer {
     deque: Arc<Mutex<KeyDeque>>,
@@ -235,6 +248,7 @@ impl KeyBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
     use std::sync::Arc;
     use std::time::Duration;
 
