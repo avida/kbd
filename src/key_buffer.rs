@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
-use crate::key_scheduler::KeyScheduler;
+use crate::config::Expressions;
 use crate::config::{ParsedConfig, get_action};
 use crate::debug_println;
+use crate::key_scheduler::KeyScheduler;
 use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::error::Error;
@@ -11,13 +12,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use timer::Guard;
-use uinput::event::Code;
 pub use uinput::event::keyboard::Key as UKey;
 
 extern crate chrono;
 extern crate timer;
 
-const DELAY_MS: i64 = 3;
+const DEFAULT_DELAY_MS: u64 = 3;
 const KEY_CAPASITY: usize = 10;
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -39,49 +39,11 @@ impl Event {
         hasher.finish()
     }
 }
-impl Ord for Event {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.key.code().cmp(&other.key.code())
-    }
-}
-
-impl PartialOrd for Event {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 pub struct BufferEvent {
     pub event: Event,
     pub guard: Option<Guard>,
 }
-
-static PATTERN: [Event; 3] = [
-    Event {
-        key: UKey::LeftMeta,
-        action: Action::Press,
-    },
-    Event {
-        key: UKey::LeftShift,
-        action: Action::Press,
-    },
-    Event {
-        key: UKey::F23,
-        action: Action::Press,
-    },
-    // Event {
-    //     key: UKey::LeftMeta,
-    //     action: Action::Release,
-    // },
-    // Event {
-    //     key: UKey::LeftShift,
-    //     action: Action::Release,
-    // },
-    // Event {
-    //     key: UKey::F23,
-    //     action: Action::Release,
-    // },
-];
 
 impl std::fmt::Debug for BufferEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -105,7 +67,7 @@ type SafeReceiver = Arc<Mutex<mpsc::Receiver<Event>>>;
 pub type SafeSender = Arc<Mutex<mpsc::Sender<Event>>>;
 pub type KeyDeque = VecDeque<BufferEvent>;
 
-pub struct KeyBuffer<'a> {
+pub struct KeyBuffer {
     deque: Arc<Mutex<KeyDeque>>,
     push_channel: SafeSender,
     _push_channel_r: SafeReceiver,
@@ -114,19 +76,19 @@ pub struct KeyBuffer<'a> {
     _pop_channel_s: SafeSender,
     timer: timer::Timer,
     key_scheduler: Arc<Mutex<KeyScheduler>>,
-    config: &'a ParsedConfig,
+    config: ParsedConfig,
 }
 
-impl<'a> KeyBuffer<'a> {
+impl KeyBuffer {
     pub fn push(&self, key: UKey, action: Action) {
         let event = Event {
             key: key,
             action: action,
         };
-        if DELAY_MS == 0 {
+        if self.config.has_key(&event) {
             self.push_channel.lock().unwrap().send(event).unwrap();
         } else {
-            self.push_channel.lock().unwrap().send(event).unwrap();
+            self._pop_channel_s.lock().unwrap().send(event).unwrap();
         }
     }
     pub fn pop(&self) -> Option<Event> {
@@ -156,20 +118,7 @@ impl<'a> KeyBuffer<'a> {
     }
 }
 
-impl <'a>KeyBuffer<'a> {
-    fn _gotcha(self: Arc<Self>) -> bool {
-        let deq = self.deque.lock().unwrap();
-        if PATTERN.len() != deq.len() {
-            return false;
-        }
-        for (buf_event, pat_event) in deq.iter().zip(PATTERN.iter()) {
-            if buf_event.event != *pat_event {
-                return false;
-            }
-        }
-        true
-    }
-
+impl KeyBuffer {
     fn _schedule_event(self: Arc<Self>, event: Event, delay: i64) {
         debug_println!("Scheduled {:?} {}", event, delay);
         let self_c = self.clone();
@@ -193,15 +142,23 @@ impl <'a>KeyBuffer<'a> {
     fn _start_listen(key_buffer: Arc<Self>) {
         thread::spawn(move || {
             let kb = key_buffer.clone();
+            let delay: u64 = kb.config.delay_ms.unwrap_or(DEFAULT_DELAY_MS);
             loop {
                 if let Ok(received) = kb._push_channel_r.lock().unwrap().recv() {
-                    kb.clone()._schedule_event(received, DELAY_MS);
+                    kb.clone()._schedule_event(received, delay as i64);
                     debug_println!("Buffer size after push: {}", kb.deque.lock().unwrap().len());
-                    if kb.clone()._gotcha() {
+                    let mut action: Option<&Expressions> = None;
+                    {
+                        // Scope to hold deque mutex
+                        let deq = kb.deque.lock().unwrap();
+                        action = get_action(&deq, &kb.config.key_combinations);
+                    }
+                    if action.is_some() {
+                        println!("GOTCH!!");
                         kb.clone()._drop();
                         {
                             let mut locked_scheduler = kb.key_scheduler.lock().unwrap();
-                           macro_rules! try_schedule {
+                            macro_rules! try_schedule {
                                 ($scheduler:expr, $event:expr, $delay:expr) => {
                                     if let Err(e) = $scheduler.schedule($event, $delay) {
                                         eprintln!("Error scheduling event: {}", e);
@@ -225,13 +182,14 @@ impl <'a>KeyBuffer<'a> {
                                 500
                             );
                         }
+                        println!("GOTCH!aaaa!");
                     }
                 }
             }
         });
     }
 
-    pub fn new(app_config: &'a ParsedConfig) -> Result<Arc<Self>, Box<dyn Error>> {
+    pub fn new(app_config: ParsedConfig) -> Result<Arc<Self>, Box<dyn Error>> {
         let c_in = mpsc::channel::<Event>();
         let c_out = mpsc::channel::<Event>();
         macro_rules! make_recv {
@@ -250,7 +208,7 @@ impl <'a>KeyBuffer<'a> {
             _pop_channel_s: make_recv!(c_out.0),
             timer: timer::Timer::new(),
             key_scheduler: make_recv!(KeyScheduler::new(push_channel_ptr.clone()).unwrap()),
-            config:&app_config,
+            config: app_config,
         });
         KeyBuffer::_start_listen(kb.clone());
         Ok(kb.clone())
@@ -260,12 +218,19 @@ impl <'a>KeyBuffer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::config_from_str;
     use std::sync::Arc;
     use std::time::Duration;
 
     #[test]
     fn test_buffer() {
-        let buf = KeyBuffer::new().unwrap();
+        let cnf = config_from_str(
+            r#"
+        [main]
+        "a" = "b"
+        "#,
+        );
+        let buf = KeyBuffer::new(cnf).unwrap();
         buf.push(UKey::A, Action::Press);
         buf.push(UKey::B, Action::Release);
         buf.push(UKey::C, Action::Release);
@@ -296,7 +261,13 @@ mod tests {
 
     #[test]
     fn test_buffer_drop() {
-        let buf = KeyBuffer::new().unwrap();
+        let cnf = config_from_str(
+            r#"
+            [main]
+        "a" = "b"
+        "#,
+        );
+        let buf = KeyBuffer::new(cnf).unwrap();
         buf.push(UKey::A, Action::Press);
         buf.push(UKey::B, Action::Release);
         buf.push(UKey::C, Action::Release);

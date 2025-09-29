@@ -1,8 +1,8 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::KeyCombinationHashed;
-use super::parser::{Expressions};
-use crate::key_buffer::{KeyDeque};
+use super::parser::Expressions;
+use crate::key_buffer::KeyDeque;
 
 fn process_config() {}
 
@@ -39,18 +39,11 @@ pub fn get_action<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::Config;
-    use crate::config::_parse_config;
     use crate::key_buffer::{Action, BufferEvent, Event, KeyDeque, UKey};
 
+    use super::super::config_from_str;
     use super::*;
 
-    macro_rules! config_from_str {
-        ($s:expr) => {{
-            let raw_config: Config = toml::from_str($s).unwrap();
-            _parse_config(&raw_config)
-        }};
-    }
     macro_rules! events_deque {
             ( $( ( $key:expr, $action:expr ) ),* $(,)? ) => {{
             let mut deq = KeyDeque::new();
@@ -69,13 +62,13 @@ mod tests {
 
     #[test]
     fn test_config_processor() {
-        let config = config_from_str!(
+        let config = config_from_str(
             r#"
             [main]
             "leftmeta + leftshift + F23" = "leftctrl down + wait 500 + leftctrl up"
             "a" = "b"
             "n down" = "b + c"
-            "#
+            "#,
         );
         let deq = events_deque!(
             (UKey::LeftMeta, Action::Press),

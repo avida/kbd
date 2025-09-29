@@ -13,7 +13,7 @@ mod utils;
 fn main() -> Result<(), Box<dyn Error>> {
     let uloop = udev_loop::Udev::new().expect("Failed to create Udev device");
     let config = load_config();
-    let key_buffer = KeyBuffer::new(&config)?;
+    let key_buffer = KeyBuffer::new(config)?;
 
     let buffer_cntr = key_buffer.clone();
 

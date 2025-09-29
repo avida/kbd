@@ -3,16 +3,18 @@ use std::collections::HashSet;
 
 use crate::config::parser::Expr;
 use crate::key_buffer::{Action, Event};
-use parser::{Expressions, parse_expr};
+pub use config_processor::get_action;
+pub use parser::Expressions;
+use parser::{parse_expr};
 use serde::Deserialize;
 use toml::Table;
-pub use config_processor::get_action;
 
 mod config_processor;
 mod parser;
 
 #[derive(Deserialize, Debug)]
 struct Config {
+    delay_ms: Option<u64>,
     main: Table,
 }
 
@@ -24,7 +26,7 @@ pub struct KeyCombination {
 
 // type KeyCombinations = Vec<KeyCombination>;
 #[derive(Debug)]
-struct KeyCombinationHashed {
+pub struct KeyCombinationHashed {
     combinations: KeyCombination,
     keys_hashes: Box<KeyHashes>,
 }
@@ -32,7 +34,8 @@ struct KeyCombinationHashed {
 type KeyHashes = HashSet<u64>;
 #[derive(Debug)]
 pub struct ParsedConfig {
-    key_combinations: Vec<KeyCombinationHashed>,
+    pub delay_ms: Option<u64>,
+    pub key_combinations: Vec<KeyCombinationHashed>,
     combo_hashes: Box<KeyHashes>,
 }
 
@@ -112,6 +115,7 @@ fn _parse_config(config: &Config) -> ParsedConfig {
     }
 
     ParsedConfig {
+        delay_ms: config.delay_ms,
         key_combinations: combos,
         combo_hashes: total_hashes,
     }
@@ -127,9 +131,16 @@ fn _read_config(path: &str) -> Result<Config, &'static str> {
 }
 
 #[cfg(test)]
+pub fn config_from_str(s: &str) -> ParsedConfig {
+    use crate::config::_parse_config;
+    use crate::config::Config;
+    let raw_config: Config = toml::from_str(s).unwrap();
+    _parse_config(&raw_config)
+}
+
+#[cfg(test)]
 mod tests {
     use crate::key_buffer::UKey;
-    use std::str::FromStr;
 
     use super::*;
 
@@ -147,18 +158,17 @@ mod tests {
     }
     #[test]
     fn test_config_parse() {
-        let config = Config {
-            main: Table::from_str(
-                r#"
-                "leftmeta + leftshift  + F23" = "leftctrl down + wait 500  + leftctrl up"
-                "a" = "b"
+        let parsed_config = config_from_str(
+            r#"
+            delay_ms = 5
+            [main]
+            "leftmeta + leftshift  + F23" = "leftctrl down + wait 500  + leftctrl up"
+            "a" = "b"
             "#,
-            )
-            .unwrap(),
-        };
-        let parsed_config = _parse_config(&config);
+        );
 
         assert_eq!(parsed_config.key_combinations.len(), 2);
+        assert_eq!(parsed_config.delay_ms, Some(5));
 
         assert!(parsed_config.has_key(&Event {
             key: UKey::LeftShift,
@@ -191,7 +201,6 @@ mod tests {
             }),
             false
         );
-        println!("config {config:?}");
         println!("parsed {parsed_config:?}");
     }
 
