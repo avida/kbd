@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use crate::config::parser::Expr;
 use crate::key_buffer::{Action, Event};
-pub use config_processor::get_action;
+pub use config_processor::{get_action, action_to_events};
 pub use parser::Expressions;
 use parser::{parse_expr};
 use serde::Deserialize;
@@ -24,7 +24,6 @@ pub struct KeyCombination {
     action: Expressions,
 }
 
-// type KeyCombinations = Vec<KeyCombination>;
 #[derive(Debug)]
 pub struct KeyCombinationHashed {
     combinations: KeyCombination,
@@ -46,17 +45,18 @@ impl ParsedConfig {
     }
 }
 
-macro_rules! read_config {
-    ($a: expr) => {
-        _read_config($a)
-    };
-    () => {
-        _read_config("config.toml")
-    };
+#[allow(dead_code)]
+fn read_config() -> Result<Config, &'static str> {
+    #[cfg(debug_assertions)]
+    let config_path = "config.toml";
+    #[cfg(not(debug_assertions))]
+    let config_path = "/etc/kbd/config.toml";
+    _read_config(config_path)
 }
 
 pub fn load_config() -> ParsedConfig {
-    let raw_config = read_config!().unwrap();
+
+    let raw_config = read_config().unwrap();
     _parse_config(&raw_config)
 }
 
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn test_config() {
-        let config = read_config!().unwrap();
+        let config = read_config().unwrap();
         let expected_key = "leftmeta + leftshift  + F23";
         assert!(
             config.main.contains_key(expected_key),

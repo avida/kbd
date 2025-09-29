@@ -112,7 +112,7 @@ pub struct KeyExpr {
 }
 #[derive(Debug, PartialEq)]
 pub struct WaitExpr {
-    milliseconds: u64,
+    pub milliseconds: u64,
 }
 
 #[derive(Debug, PartialEq)]

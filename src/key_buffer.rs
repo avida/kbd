@@ -1,7 +1,5 @@
 #![allow(dead_code)]
-
-use crate::config::Expressions;
-use crate::config::{ParsedConfig, get_action};
+use crate::config::{ParsedConfig, action_to_events, get_action};
 use crate::debug_println;
 use crate::key_scheduler::KeyScheduler;
 use std::collections::VecDeque;
@@ -20,7 +18,7 @@ extern crate timer;
 const DEFAULT_DELAY_MS: u64 = 3;
 const KEY_CAPASITY: usize = 10;
 
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash, Copy)]
 pub enum Action {
     Press,
     Release,
@@ -147,17 +145,13 @@ impl KeyBuffer {
                 if let Ok(received) = kb._push_channel_r.lock().unwrap().recv() {
                     kb.clone()._schedule_event(received, delay as i64);
                     debug_println!("Buffer size after push: {}", kb.deque.lock().unwrap().len());
-                    let mut action: Option<&Expressions> = None;
-                    {
-                        // Scope to hold deque mutex
-                        let deq = kb.deque.lock().unwrap();
-                        action = get_action(&deq, &kb.config.key_combinations);
-                    }
-                    if action.is_some() {
+                    let deq = kb.deque.lock().unwrap();
+                    if let Some(action) = get_action(&deq, &kb.config.key_combinations) {
                         println!("GOTCH!!");
+                        // Release deque mutex
+                        drop(deq);
                         kb.clone()._drop();
                         {
-                            let mut locked_scheduler = kb.key_scheduler.lock().unwrap();
                             macro_rules! try_schedule {
                                 ($scheduler:expr, $event:expr, $delay:expr) => {
                                     if let Err(e) = $scheduler.schedule($event, $delay) {
@@ -165,22 +159,11 @@ impl KeyBuffer {
                                     }
                                 };
                             }
-                            try_schedule!(
-                                locked_scheduler,
-                                Event {
-                                    key: UKey::RightControl,
-                                    action: Action::Press,
-                                },
-                                0
-                            );
-                            try_schedule!(
-                                locked_scheduler,
-                                Event {
-                                    key: UKey::RightControl,
-                                    action: Action::Release,
-                                },
-                                500
-                            );
+                            let mut locked_scheduler = kb.key_scheduler.lock().unwrap();
+                            let events = action_to_events(action);
+                            for (delay, event) in events {
+                                try_schedule!(locked_scheduler, event, delay);
+                            }
                         }
                         println!("GOTCH!aaaa!");
                     }
