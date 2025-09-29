@@ -1,9 +1,12 @@
 #![allow(dead_code)]
 
-use super::key_scheduler::KeyScheduler;
+use crate::key_scheduler::KeyScheduler;
+use crate::config::{ParsedConfig, get_action};
 use crate::debug_println;
 use std::collections::VecDeque;
+use std::collections::hash_map::DefaultHasher;
 use std::error::Error;
+use std::hash::{Hash, Hasher};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -29,6 +32,13 @@ pub struct Event {
     pub action: Action,
 }
 
+impl Event {
+    pub fn get_u64_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+}
 impl Ord for Event {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.key.code().cmp(&other.key.code())
@@ -43,7 +53,7 @@ impl PartialOrd for Event {
 
 pub struct BufferEvent {
     pub event: Event,
-    guard: Option<Guard>,
+    pub guard: Option<Guard>,
 }
 
 static PATTERN: [Event; 3] = [
@@ -95,7 +105,7 @@ type SafeReceiver = Arc<Mutex<mpsc::Receiver<Event>>>;
 pub type SafeSender = Arc<Mutex<mpsc::Sender<Event>>>;
 pub type KeyDeque = VecDeque<BufferEvent>;
 
-pub struct KeyBuffer {
+pub struct KeyBuffer<'a> {
     deque: Arc<Mutex<KeyDeque>>,
     push_channel: SafeSender,
     _push_channel_r: SafeReceiver,
@@ -104,9 +114,10 @@ pub struct KeyBuffer {
     _pop_channel_s: SafeSender,
     timer: timer::Timer,
     key_scheduler: Arc<Mutex<KeyScheduler>>,
+    config: &'a ParsedConfig,
 }
 
-impl KeyBuffer {
+impl<'a> KeyBuffer<'a> {
     pub fn push(&self, key: UKey, action: Action) {
         let event = Event {
             key: key,
@@ -145,7 +156,7 @@ impl KeyBuffer {
     }
 }
 
-impl KeyBuffer {
+impl <'a>KeyBuffer<'a> {
     fn _gotcha(self: Arc<Self>) -> bool {
         let deq = self.deque.lock().unwrap();
         if PATTERN.len() != deq.len() {
@@ -190,7 +201,7 @@ impl KeyBuffer {
                         kb.clone()._drop();
                         {
                             let mut locked_scheduler = kb.key_scheduler.lock().unwrap();
-                            macro_rules! try_schedule {
+                           macro_rules! try_schedule {
                                 ($scheduler:expr, $event:expr, $delay:expr) => {
                                     if let Err(e) = $scheduler.schedule($event, $delay) {
                                         eprintln!("Error scheduling event: {}", e);
@@ -220,7 +231,7 @@ impl KeyBuffer {
         });
     }
 
-    pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+    pub fn new(app_config: &'a ParsedConfig) -> Result<Arc<Self>, Box<dyn Error>> {
         let c_in = mpsc::channel::<Event>();
         let c_out = mpsc::channel::<Event>();
         macro_rules! make_recv {
@@ -239,6 +250,7 @@ impl KeyBuffer {
             _pop_channel_s: make_recv!(c_out.0),
             timer: timer::Timer::new(),
             key_scheduler: make_recv!(KeyScheduler::new(push_channel_ptr.clone()).unwrap()),
+            config:&app_config,
         });
         KeyBuffer::_start_listen(kb.clone());
         Ok(kb.clone())
@@ -248,7 +260,6 @@ impl KeyBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cmp::Ordering;
     use std::sync::Arc;
     use std::time::Duration;
 

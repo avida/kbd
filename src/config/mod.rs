@@ -1,16 +1,12 @@
 #![allow(dead_code)]
 use std::collections::HashSet;
-use std::rc::Rc;
 
 use crate::config::parser::Expr;
-use crate::key_buffer::Event;
-use crate::{
-    config::parser::KeyExpr,
-    key_buffer::{Action, UKey},
-};
+use crate::key_buffer::{Action, Event};
 use parser::{Expressions, parse_expr};
 use serde::Deserialize;
 use toml::Table;
+pub use config_processor::get_action;
 
 mod config_processor;
 mod parser;
@@ -26,17 +22,24 @@ pub struct KeyCombination {
     action: Expressions,
 }
 
-type KeyCombinations = Vec<KeyCombination>;
-
+// type KeyCombinations = Vec<KeyCombination>;
 #[derive(Debug)]
-struct ParsedConfig {
-    key_combinations: KeyCombinations,
-    keys_set: Box<HashSet<Event>>,
+struct KeyCombinationHashed {
+    combinations: KeyCombination,
+    keys_hashes: Box<KeyHashes>,
+}
+
+type KeyHashes = HashSet<u64>;
+#[derive(Debug)]
+pub struct ParsedConfig {
+    key_combinations: Vec<KeyCombinationHashed>,
+    combo_hashes: Box<KeyHashes>,
 }
 
 impl ParsedConfig {
     pub fn has_key(&self, event: &Event) -> bool {
-        return self.keys_set.contains(event);
+        let hash = event.get_u64_hash();
+        self.combo_hashes.contains(&hash)
     }
 }
 
@@ -49,38 +52,59 @@ macro_rules! read_config {
     };
 }
 
+pub fn load_config() -> ParsedConfig {
+    let raw_config = read_config!().unwrap();
+    _parse_config(&raw_config)
+}
+
 fn _parse_config(config: &Config) -> ParsedConfig {
-    let mut combos = Vec::<KeyCombination>::new();
-    let mut key_events = Box::new(HashSet::<Event>::new());
+    let mut combos = Vec::<KeyCombinationHashed>::new();
+    let mut total_hashes = Box::new(KeyHashes::new());
     for (k, v) in config.main.iter() {
+        let mut key_events = Box::new(KeyHashes::new());
         if let toml::Value::String(v) = v {
             let parsed_condition = parse_expr(k);
+
             for c in &parsed_condition {
                 if let Expr::Key(k) = c {
                     match &k.action {
                         None => {
-                            key_events.insert(Event {
+                            let hash = Event {
                                 key: k.key,
                                 action: Action::Press,
-                            });
-                            key_events.insert(Event {
+                            }
+                            .get_u64_hash();
+
+                            key_events.insert(hash);
+                            total_hashes.insert(hash);
+                            let hash = Event {
                                 key: k.key,
                                 action: Action::Release,
-                            });
+                            }
+                            .get_u64_hash();
+                            key_events.insert(hash);
+                            total_hashes.insert(hash);
                         }
                         Some(action) => {
-                            key_events.insert(Event {
+                            let hash = Event {
                                 key: k.key,
                                 action: action.clone(),
-                            });
+                            }
+                            .get_u64_hash();
+                            key_events.insert(hash);
+                            total_hashes.insert(hash);
                         }
                     }
                 }
             }
+
             let parsed_action = parse_expr(v);
-            combos.push(KeyCombination {
-                combination: parsed_condition,
-                action: parsed_action,
+            combos.push(KeyCombinationHashed {
+                combinations: KeyCombination {
+                    combination: parsed_condition,
+                    action: parsed_action,
+                },
+                keys_hashes: key_events,
             });
         } else {
             panic!("Expected a string value for key '{}', but found {:?}", k, v)
@@ -89,7 +113,7 @@ fn _parse_config(config: &Config) -> ParsedConfig {
 
     ParsedConfig {
         key_combinations: combos,
-        keys_set: key_events.clone(),
+        combo_hashes: total_hashes,
     }
 }
 
@@ -104,6 +128,7 @@ fn _read_config(path: &str) -> Result<Config, &'static str> {
 
 #[cfg(test)]
 mod tests {
+    use crate::key_buffer::UKey;
     use std::str::FromStr;
 
     use super::*;
@@ -126,11 +151,15 @@ mod tests {
             main: Table::from_str(
                 r#"
                 "leftmeta + leftshift  + F23" = "leftctrl down + wait 500  + leftctrl up"
+                "a" = "b"
             "#,
             )
             .unwrap(),
         };
         let parsed_config = _parse_config(&config);
+
+        assert_eq!(parsed_config.key_combinations.len(), 2);
+
         assert!(parsed_config.has_key(&Event {
             key: UKey::LeftShift,
             action: Action::Press
@@ -145,6 +174,14 @@ mod tests {
         }));
         assert!(parsed_config.has_key(&Event {
             key: UKey::F23,
+            action: Action::Release
+        }));
+        assert!(parsed_config.has_key(&Event {
+            key: UKey::A,
+            action: Action::Press
+        }));
+        assert!(parsed_config.has_key(&Event {
+            key: UKey::A,
             action: Action::Release
         }));
         assert_eq!(
@@ -157,6 +194,7 @@ mod tests {
         println!("config {config:?}");
         println!("parsed {parsed_config:?}");
     }
+
     #[test]
     #[ignore = "Rust playground"]
     fn test_something() {
