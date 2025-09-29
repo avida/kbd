@@ -45,7 +45,7 @@ uninstall_kbd_service() {
 	# Stop and disable the service
 	sudo systemctl stop kbd.service || true
 	sudo systemctl disable kbd.service || true
-	# Remove config file only if hash matches
+	# Remove config file only if it unchanged
 	if [ -f "$CONFIG_DEST" ] && [ -f "$CONFIG_HASH" ]; then
 		current_hash=$(md5sum "$CONFIG_DEST" | awk '{print $1}')
 		stored_hash=$(cat "$CONFIG_HASH")

@@ -210,7 +210,7 @@ mod tests {
         let cnf = config_from_str(
             r#"
         [main]
-        "a" = "b"
+        "a down + b up + c up" = "b"
         "#,
         );
         let buf = KeyBuffer::new(cnf).unwrap();
@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(
             buf.pop(),
             Some(Event {
-                key: UKey::A,
+                key: UKey::B,
                 action: Action::Press
             })
         );
@@ -232,22 +232,73 @@ mod tests {
                 action: Action::Release
             })
         );
-        assert_eq!(
-            buf.pop(),
-            Some(Event {
-                key: UKey::C,
-                action: Action::Release
-            })
-        );
         assert_eq!(buf.try_pop(), None);
     }
 
+    #[test]
+    fn test_buffer_delay() {
+        let cnf = config_from_str(
+            r#"
+            delay_ms=5
+            [main]
+        "a" = "b"
+        "#,
+        );
+        let buf = KeyBuffer::new(cnf).unwrap();
+        buf.push(UKey::A, Action::Press);
+        thread::sleep(Duration::from_millis(10));
+        buf.push(UKey::A, Action::Release);
+        thread::sleep(Duration::from_millis(10));
+        assert_eq!(
+            buf.try_pop(),
+            Some(Event {
+                key: UKey::A,
+                action: Action::Press
+            })
+        );
+        assert_eq!(
+            buf.try_pop(),
+            Some(Event {
+                key: UKey::A,
+                action: Action::Release
+            })
+        );
+        assert_eq!(buf.deque.lock().unwrap().len(), 0);
+
+        let cnf = config_from_str(
+            r#"
+            delay_ms=12
+            [main]
+        "a" = "b"
+        "#,
+        );
+        let buf = KeyBuffer::new(cnf).unwrap();
+        buf.push(UKey::A, Action::Press);
+        thread::sleep(Duration::from_millis(10));
+        buf.push(UKey::A, Action::Release);
+        thread::sleep(Duration::from_millis(15));
+        assert_eq!(
+            buf.try_pop(),
+            Some(Event {
+                key: UKey::B,
+                action: Action::Press
+            })
+        );
+        assert_eq!(
+            buf.try_pop(),
+            Some(Event {
+                key: UKey::B,
+                action: Action::Release
+            })
+        );
+        assert_eq!(buf.deque.lock().unwrap().len(), 0);
+    }
     #[test]
     fn test_buffer_drop() {
         let cnf = config_from_str(
             r#"
             [main]
-        "a" = "b"
+        "a down + b up + c up" = "b"
         "#,
         );
         let buf = KeyBuffer::new(cnf).unwrap();
